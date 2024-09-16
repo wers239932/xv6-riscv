@@ -151,6 +151,7 @@ UPROGS=\
 	$U/_zombie\
 	$U/_dumptests\
 	$U/_dump2tests\
+	$U/_alloctest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
