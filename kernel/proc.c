@@ -693,3 +693,28 @@ procdump(void)
     printf("\n");
   }
 }
+
+
+
+void print_register(const char *reg_name, uint64 reg_value) {
+    printf("%s: %d\n", reg_name, (uint32)reg_value);
+}
+
+int
+dump(void)
+{
+  struct proc *p = myproc();
+  
+  if(p == 0 || p->trapframe == 0) {
+    return -1;
+  }
+  
+  const char *reg_names[] = {"s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11"};
+  uint64 *regs = (uint64*)&p->trapframe->s2;
+  
+  for(int i = 0; i < 10; i++) {
+    print_register(reg_names[i], regs[i]);
+  }
+  
+  return 0;
+}
