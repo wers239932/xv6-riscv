@@ -43,3 +43,4 @@ void* malloc(uint);
 void free(void*);
 
 int dump(void);
+int dump2(int pid, int register_num, uint64 *return_value);

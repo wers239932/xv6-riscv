@@ -97,3 +97,79 @@ sys_dump(void)
 {
   return dump();
 }
+
+extern struct proc proc[NPROC];
+
+uint64
+sys_dump2(void)
+{
+  int pid;
+  int register_num;
+  uint64 return_value_addr;
+  uint64 return_value;
+  struct proc *p;
+  struct proc *current = myproc();
+  
+  argint(0, &pid);
+  argint(1, &register_num);
+  argaddr(2, &return_value_addr);
+  
+  if(register_num < 2 || register_num > 11)
+    return -3;
+  
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->pid == pid) {
+      int has_access = 0;
+      
+      if(p == current) {
+        has_access = 1;
+      } else {
+        struct proc *parent = p->parent;
+        while(parent != 0) {
+          if(parent == current) {
+            has_access = 1;
+            break;
+          }
+          parent = parent->parent;
+        }
+      }
+      
+      if(!has_access) {
+        release(&p->lock);
+        return -1;
+      }
+      
+      if(p->trapframe == 0) {
+        release(&p->lock);
+        return -2;
+      }
+      
+      uint64* trapframe_regs[] = {
+          &p->trapframe->s2,
+          &p->trapframe->s3, 
+          &p->trapframe->s4,
+          &p->trapframe->s5,
+          &p->trapframe->s6,
+          &p->trapframe->s7,
+          &p->trapframe->s8,
+          &p->trapframe->s9,
+          &p->trapframe->s10,
+          &p->trapframe->s11
+      };
+
+      int reg_index = register_num - 2;
+      return_value = *trapframe_regs[reg_index];
+      
+      release(&p->lock);
+      
+      if(copyout(current->pagetable, return_value_addr, (char *)&return_value, sizeof(return_value)) < 0)
+        return -4;
+      
+      return 0;
+    }
+    release(&p->lock);
+  }
+  
+  return -2;
+}

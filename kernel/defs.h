@@ -203,4 +203,5 @@ void           bd_free(void*);
 void           *bd_malloc(uint64);
 
 
-int             dump(void);
+int            dump(void);
+int            dump2(int, int, uint64*);
