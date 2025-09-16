@@ -98,8 +98,6 @@ sys_dump(void)
   return dump();
 }
 
-extern struct proc proc[NPROC];
-
 uint64
 sys_dump2(void)
 {

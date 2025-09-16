@@ -697,7 +697,7 @@ procdump(void)
 
 
 void print_register(const char *reg_name, uint64 reg_value) {
-    printf("%s = %d\n", reg_name, (uint32)reg_value);
+    printf("%s = %d\n", reg_name, (int)reg_value);
 }
 
 int
@@ -728,8 +728,10 @@ int dump2(int pid, int register_num, uint64 *return_value) {
     return -3;
   
   for(p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);
     if(p->pid == pid) {
+      
+      acquire(&p->lock);
+
       int has_access = 0;
       
       if(p == current) {
@@ -775,10 +777,9 @@ int dump2(int pid, int register_num, uint64 *return_value) {
       
       if(copyout(current->pagetable, *return_value, (char *)&ret, sizeof(ret)) < 0)
         return -4;
-      
+
       return 0;
     }
-    release(&p->lock);
   }
   
   return -2; 
