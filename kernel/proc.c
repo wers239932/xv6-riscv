@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include <stdint.h>
 
 struct cpu cpus[NCPU];
 
@@ -694,10 +695,10 @@ procdump(void)
   }
 }
 
-
+#include <stddef.h>
 
 void print_register(const char *reg_name, uint64 reg_value) {
-    printf("%s = %d\n", reg_name, (int)reg_value);
+    printf("%s = %d\n", reg_name, (uint32)reg_value);
 }
 
 int
@@ -730,7 +731,11 @@ int dump2(int pid, int register_num, uint64 *return_value) {
   for(p = proc; p < &proc[NPROC]; p++) {
     if(p->pid == pid) {
       
-      acquire(&p->lock);
+      if(p->trapframe == NULL) {
+        return -2;
+      }
+      struct trapframe frame = *(p->trapframe);
+      
 
       int has_access = 0;
       
@@ -748,32 +753,27 @@ int dump2(int pid, int register_num, uint64 *return_value) {
       }
       
       if(!has_access) {
-        release(&p->lock);
         return -1;
       }
       
-      if(p->trapframe == 0) {
-        release(&p->lock);
-        return -2;
-      }
       
-      uint64* trapframe_regs[] = {
-          &p->trapframe->s2,
-          &p->trapframe->s3, 
-          &p->trapframe->s4,
-          &p->trapframe->s5,
-          &p->trapframe->s6,
-          &p->trapframe->s7,
-          &p->trapframe->s8,
-          &p->trapframe->s9,
-          &p->trapframe->s10,
-          &p->trapframe->s11
+      uint64 trapframe_regs[] = {
+              frame.s2,
+              frame.s3,
+              frame.s4,
+              frame.s5,
+              frame.s6,
+              frame.s7,
+              frame.s8,
+              frame.s9,
+              frame.s10,
+              frame.s11,
+
       };
 
       int reg_index = register_num - 2;
-      ret = *trapframe_regs[reg_index];
+      ret = trapframe_regs[reg_index];
       
-      release(&p->lock);
       
       if(copyout(current->pagetable, *return_value, (char *)&ret, sizeof(ret)) < 0)
         return -4;
@@ -783,4 +783,15 @@ int dump2(int pid, int register_num, uint64 *return_value) {
   }
   
   return -2; 
+}
+
+int ps(void) {
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(!p->killed) {
+      if(p->state==0) continue;
+      printf("pid: %d, isKilled: %d, state: %d\n", p->pid, p->killed, p->state);
+    }
+  }
+  return 0;
 }

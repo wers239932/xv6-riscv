@@ -111,3 +111,9 @@ sys_dump2(void)
   
   return dump2(pid, register_num, &return_value_addr);
 }
+
+uint64
+sys_ps(void) {
+  ps();
+  return 0;
+}
