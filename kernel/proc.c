@@ -378,6 +378,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  freeproc(p);
 
   release(&wait_lock);
 
