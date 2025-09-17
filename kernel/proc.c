@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include <stdint.h>
 
 struct cpu cpus[NCPU];
 
@@ -377,6 +378,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  freeproc(p);
 
   release(&wait_lock);
 
@@ -692,4 +694,105 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+#include <stddef.h>
+
+void print_register(const char *reg_name, uint64 reg_value) {
+    printf("%s = %d\n", reg_name, (uint32)reg_value);
+}
+
+int
+dump(void)
+{
+  struct proc *p = myproc();
+  
+  if(p == 0 || p->trapframe == 0) {
+    return -1;
+  }
+  
+  const char *reg_names[] = {"s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11"};
+  uint64 *regs = (uint64*)&p->trapframe->s2;
+  
+  for(int i = 0; i < 10; i++) {
+    print_register(reg_names[i], regs[i]);
+  }
+  
+  return 0;
+}
+
+int dump2(int pid, int register_num, uint64 *return_value) {
+  struct proc *p;
+  struct proc *current = myproc();
+  uint64 ret;
+
+  if(register_num < 2 || register_num > 11)
+    return -3;
+  
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      
+      if(p->trapframe == NULL) {
+        return -2;
+      }
+      struct trapframe frame = *(p->trapframe);
+      
+
+      int has_access = 0;
+      
+      if(p == current) {
+        has_access = 1;
+      } else {
+        struct proc *parent = p->parent;
+        while(parent != 0) {
+          if(parent == current) {
+            has_access = 1;
+            break;
+          }
+          parent = parent->parent;
+        }
+      }
+      
+      if(!has_access) {
+        return -1;
+      }
+      
+      
+      uint64 trapframe_regs[] = {
+              frame.s2,
+              frame.s3,
+              frame.s4,
+              frame.s5,
+              frame.s6,
+              frame.s7,
+              frame.s8,
+              frame.s9,
+              frame.s10,
+              frame.s11,
+
+      };
+
+      int reg_index = register_num - 2;
+      ret = trapframe_regs[reg_index];
+      
+      
+      if(copyout(current->pagetable, *return_value, (char *)&ret, sizeof(ret)) < 0)
+        return -4;
+
+      return 0;
+    }
+  }
+  
+  return -2; 
+}
+
+int ps(void) {
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(!p->killed) {
+      if(p->state==0) continue;
+      printf("pid: %d, isKilled: %d, state: %d\n", p->pid, p->killed, p->state);
+    }
+  }
+  return 0;
 }
