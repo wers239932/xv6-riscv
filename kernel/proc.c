@@ -13,6 +13,7 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
+int ZOMBIE_TIMEOUT = 10;
 int nextpid = 1;
 struct spinlock pid_lock;
 
@@ -125,6 +126,10 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->lastDeadChild.valid = 0;
+  p->lastDeadChild.status = 0;
+  p->lastDeadChild.pid = -1;
+  p->zombie_since = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -156,6 +161,9 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  if(!holding(&p->lock))
+    panic("freeproc: p->lock not held");
+
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
@@ -170,6 +178,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->zombie_since = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -373,12 +382,36 @@ exit(int status)
 
   // Parent might be sleeping in wait().
   wakeup(p->parent);
-  
-  acquire(&p->lock);
 
+  struct proc *parent = p->parent;
+
+  if(parent){
+    acquire(&parent->lock);
+    // Если у родителя ещё нет сохранённого статуса — сохраняем и
+    // перепривязываем текущий процесс к initproc, чтобы он не висел у родителя.
+    if (!parent->lastDeadChild.valid) {
+      parent->lastDeadChild.valid = 1;
+      parent->lastDeadChild.status = status;
+      parent->lastDeadChild.pid = p->pid;
+
+      // Перепривязываем процесс к init
+      p->parent = initproc;
+    } else {
+      // Если родитель уже имеет lastDeadChild, тоже перепривяжем
+      // к init, чтобы гарантировать быстрое освобождение.
+
+      p->zombie_since = ticks;
+    }
+    release(&parent->lock);
+  } else {
+    // так не должно быть но на всякий
+    p->parent = initproc;
+  }
+
+  acquire(&p->lock);
   p->xstate = status;
   p->state = ZOMBIE;
-  freeproc(p);
+  p->zombie_since = ticks;
 
   release(&wait_lock);
 
@@ -397,6 +430,42 @@ wait(uint64 addr)
   struct proc *p = myproc();
 
   acquire(&wait_lock);
+
+  /* сначала — проверяем сохранённый статус последнего умершего ребёнка */
+  acquire(&p->lock);
+  if (p->lastDeadChild.valid) {
+      pid = p->lastDeadChild.pid;
+      int status = p->lastDeadChild.status;
+      p->lastDeadChild.valid = 0;
+      release(&p->lock);
+
+      // Найдём ребёнка по pid
+      struct proc *child = 0;
+      for(pp = proc; pp < &proc[NPROC]; pp++){
+          acquire(&pp->lock);
+          if(pp->pid == pid && pp->state == ZOMBIE){
+              child = pp;
+              break;
+          }
+          release(&pp->lock);
+      }
+
+      if(addr != 0 && copyout(p->pagetable, addr, (char *)&status, sizeof(status)) < 0){
+          if(child) release(&child->lock);
+          release(&wait_lock);
+          return -1;
+      }
+
+      if(child){
+          freeproc(child);
+          release(&child->lock);
+      }
+
+      release(&wait_lock);
+      return pid;
+  }
+  release(&p->lock);
+
 
   for(;;){
     // Scan through table looking for exited children.
@@ -427,10 +496,25 @@ wait(uint64 addr)
 
     // No point waiting if we don't have any children.
     if(!havekids || killed(p)){
+      // Если мы initproc, собираем перепривязанных зомби
+      if (p == initproc) {
+        for (pp = proc; pp < &proc[NPROC]; pp++) {
+          acquire(&pp->lock);
+          if (pp->state == ZOMBIE && pp->parent == initproc) {
+            pid = pp->pid;
+            freeproc(pp);
+            release(&pp->lock);
+            release(&wait_lock);
+            return pid;
+          }
+          release(&pp->lock);
+        }
+      }
+
       release(&wait_lock);
       return -1;
     }
-    
+
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
@@ -459,6 +543,7 @@ scheduler(void)
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
@@ -472,8 +557,37 @@ scheduler(void)
         c->proc = 0;
         found = 1;
       }
+
+      /* Авто-сборка зомби: если зомби старше timeout и
+         он уже перепривязан к initproc — можно безопасно freeproc */
+      if (p->state == ZOMBIE && p->zombie_since != 0 &&
+          (ticks - p->zombie_since) > ZOMBIE_TIMEOUT) {
+
+        release(&p->lock);
+
+        acquire(&wait_lock);
+        acquire(&p->lock);
+        // Повторная проверка: состояние могло поменяться пока локи снимались/брался wait_lock
+        if (p->state == ZOMBIE && p->zombie_since != 0 &&
+            (ticks - p->zombie_since) > ZOMBIE_TIMEOUT) {
+          if (p->parent != initproc) {
+            printf("scheduler: reparent pid %d -> init\n", p->pid);
+            p->parent = initproc;
+            // wakeup на родителя — initproc; wait() спит на канале initproc (поскольку myproc()==initproc)
+            wakeup(initproc);
+          }
+        }
+        release(&p->lock);
+        release(&wait_lock);
+
+        continue;
+      }
+
+
+
       release(&p->lock);
     }
+
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.
       intr_on();
@@ -788,6 +902,7 @@ int dump2(int pid, int register_num, uint64 *return_value) {
 
 int ps(void) {
   struct proc *p;
+  printf("ps from proc %d:\n", myproc()->pid);
   for(p = proc; p < &proc[NPROC]; p++) {
     if(!p->killed) {
       if(p->state==0) continue;
