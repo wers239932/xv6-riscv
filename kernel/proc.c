@@ -8,7 +8,7 @@
 
 struct cpu cpus[NCPU];
 
-struct proc proc[NPROC];
+struct proc *proc;
 
 struct proc *initproc;
 
@@ -48,15 +48,23 @@ void
 procinit(void)
 {
   struct proc *p;
-  
+
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+
+  // Выделяем массив структур proc через buddy-аллокатор
+  proc = (struct proc*)bd_malloc(sizeof(struct proc) * NPROC);
+  if (proc == 0)
+    panic("proc: bd_malloc failed");
+  memset(proc, 0, sizeof(struct proc) * NPROC);
+
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
   }
 }
+
 
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
