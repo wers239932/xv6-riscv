@@ -308,7 +308,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // Copies both the page table and the
 // physical memory.
 // returns 0 on success, -1 on failure.
-// frees any allocated pages on failure.
+// frees any allocated pages on failure.g
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
@@ -443,4 +443,31 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+
+static void
+vmprintwalk(pagetable_t pagetable, int level)
+{
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      for(int j = 0; j <= level; j++){
+        printf(".. ");
+      }
+      uint64 pa = PTE2PA(pte);
+      printf("%d: pte 0x%lx pa 0x%lx\n", i, pte, pa);
+      
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        vmprintwalk((pagetable_t)pa, level + 1);
+      }
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  vmprintwalk(pagetable, 0);
 }
