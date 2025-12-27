@@ -408,15 +408,12 @@ wait(uint64 addr)
         if(pp->state == ZOMBIE){
           // Found one.
           pid = pp->pid;
-          if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                  sizeof(pp->xstate)) < 0) {
-            release(&pp->lock);
-            release(&wait_lock);
-            return -1;
-          }
+          int xstate = pp->xstate;
           freeproc(pp);
           release(&pp->lock);
           release(&wait_lock);
+          if(addr != 0)
+            copyout(p->pagetable, addr, (char *)&xstate, sizeof(xstate));
           return pid;
         }
         release(&pp->lock);
@@ -433,6 +430,7 @@ wait(uint64 addr)
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
 }
+
 
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.

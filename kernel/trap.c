@@ -38,44 +38,77 @@ usertrap(void)
 {
   int which_dev = 0;
 
+  // Проверяем, что прерывание пришло из пользовательского режима
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
+  // Устанавливаем вектор прерываний для режима ядра
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
   
-  // save user program counter.
+  // Сохраняем счетчик команд пользовательской программы
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
-    // system call
+  uint64 scause = r_scause();
+
+  if(scause == 8){
+    // Системный вызов
 
     if(killed(p))
       exit(-1);
 
-    // sepc points to the ecall instruction,
-    // but we want to return to the next instruction.
+    // sepc указывает на инструкцию ecall,
+    // но мы хотим вернуться к следующей инструкции
     p->trapframe->epc += 4;
 
-    // an interrupt will change sepc, scause, and sstatus,
-    // so enable only now that we're done with those registers.
+    // Прерывания могут изменить sepc, scause и sstatus,
+    // поэтому включаем прерывания только сейчас
     intr_on();
 
     syscall();
-  } else if(r_scause() == 13 || r_scause() == 15) {
-    uint64 va = r_stval();
-    if(va >= MAXVA || copy_on_write(p->pagetable, va) < 0) {
-      printf("usertrap(): page fault pid=%d\n", p->pid);
-      printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-      setkilled(p);
+  } 
+  else if(scause == 13 || scause == 15){
+    // Обработка страничных нарушений:
+    // 13 - нарушение чтения/исполнения
+    // 15 - нарушение записи
+    uint64 fault_va = r_stval();
+    int handled = 0;
+    
+    // Проверяем, что адрес в пользовательском пространстве
+    if(fault_va < KERNBASE) {
+      pte_t *pte = walk(p->pagetable, fault_va, 0);
+      
+      // Обработка Copy-on-Write (только для нарушений записи)
+      if(scause == 15 && pte && (*pte & PTE_V) && (*pte & PTE_RSW0)) {
+        if(copy_on_write(p->pagetable, fault_va) == 0) {
+          handled = 1;
+        }
+      }
+      // Lazy allocation для невыделенных страниц
+      else if(fault_va < p->sz && (pte == 0 || (*pte & PTE_V) == 0)) {
+        if(lazyalloc(p->pagetable, fault_va, p->sz) == 0) {
+          handled = 1;
+        }
+      }
     }
-  } else if((which_dev = devintr()) != 0){
+
+    // Если ошибка не обработана, убиваем процесс
+    if(!handled) {
+      if(scause != 15 || fault_va >= MAXVA) {
+        printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
+        printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), fault_va);
+      }
+      p->killed = 1;
+    }
+  } 
+  else if((which_dev = devintr()) != 0){
+    // Обработка аппаратных прерываний (таймер, устройства)
     // ok
-  } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
+  } 
+  else {
+    // Неизвестная причина прерывания
+    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     setkilled(p);
   }

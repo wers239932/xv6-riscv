@@ -179,6 +179,7 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t);
 int             copy_on_write(pagetable_t, uint64);
+int             lazyalloc(pagetable_t pagetable, uint64 va, uint64 sz);
 
 // plic.c
 void            plicinit(void);
