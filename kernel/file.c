@@ -12,11 +12,12 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "shm.h"
 
 struct devsw devsw[NDEV];
 struct {
   struct spinlock lock;
-  struct file file[NFILE];
+  //struct file file[NFILE];
 } ftable;
 
 void
@@ -31,16 +32,15 @@ filealloc(void)
 {
   struct file *f;
 
-  acquire(&ftable.lock);
-  for(f = ftable.file; f < ftable.file + NFILE; f++){
-    if(f->ref == 0){
-      f->ref = 1;
-      release(&ftable.lock);
-      return f;
-    }
+  f = (struct file *) bd_malloc(sizeof(struct file));
+  if (f == 0) {
+    return 0;
   }
+  acquire(&ftable.lock);
+  memset(f, 0, sizeof(struct file));
+  f->ref = 1;
   release(&ftable.lock);
-  return 0;
+  return f;
 }
 
 // Increment ref count for file f.
@@ -79,7 +79,11 @@ fileclose(struct file *f)
     begin_op();
     iput(ff.ip);
     end_op();
+  } else if(ff.type == FD_SHM){
+    shm_ref_dec(ff.shm);
   }
+
+  bd_free(f);
 }
 
 // Get metadata about file f.
@@ -94,6 +98,14 @@ filestat(struct file *f, uint64 addr)
     ilock(f->ip);
     stati(f->ip, &st);
     iunlock(f->ip);
+    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
+      return -1;
+    return 0;
+  } else if(f->type == FD_SHM){
+    // For shared memory, create a basic stat structure
+    memset(&st, 0, sizeof(st));
+    st.type = T_SHM;
+    st.size = f->shm->size;
     if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
       return -1;
     return 0;
@@ -122,6 +134,10 @@ fileread(struct file *f, uint64 addr, int n)
     if((r = readi(f->ip, 1, addr, f->off, n)) > 0)
       f->off += r;
     iunlock(f->ip);
+  } else if(f->type == FD_SHM){
+    r = shm_read(f->shm, addr, f->off, n);
+    if(r > 0)
+      f->off += r;
   } else {
     panic("fileread");
   }
@@ -173,6 +189,10 @@ filewrite(struct file *f, uint64 addr, int n)
       i += r;
     }
     ret = (i == n ? n : -1);
+  } else if(f->type == FD_SHM){
+    ret = shm_write(f->shm, addr, f->off, n);
+    if(ret > 0)
+      f->off += ret;
   } else {
     panic("filewrite");
   }

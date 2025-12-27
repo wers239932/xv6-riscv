@@ -105,3 +105,9 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+struct proc_wrapper {
+  struct proc_wrapper *prev_wrap;
+  struct proc *proc;
+  struct proc_wrapper *next_wrap;
+};

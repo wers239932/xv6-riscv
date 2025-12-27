@@ -68,40 +68,35 @@ usertrap(void)
 
     syscall();
   } 
-  else if(scause == 13 || scause == 15){
-    // Обработка страничных нарушений:
-    // 13 - нарушение чтения/исполнения
-    // 15 - нарушение записи
-    uint64 fault_va = r_stval();
-    int handled = 0;
-    
-    // Проверяем, что адрес в пользовательском пространстве
-    if(fault_va < KERNBASE) {
-      pte_t *pte = walk(p->pagetable, fault_va, 0);
+  else if(scause == 13 || scause == 15) {
+      uint64 fault_va = r_stval();
+      int handled = 0;
       
-      // Обработка Copy-on-Write (только для нарушений записи)
-      if(scause == 15 && pte && (*pte & PTE_V) && (*pte & PTE_RSW0)) {
-        if(copy_on_write(p->pagetable, fault_va) == 0) {
-          handled = 1;
-        }
+      if(fault_va < KERNBASE && fault_va < p->sz) {
+          pte_t *pte = walk(p->pagetable, fault_va, 0);
+          
+          if(scause == 15 && pte && (*pte & PTE_V) && (*pte & PTE_RSW0)) {
+              if(copy_on_write(p->pagetable, fault_va) == 0) {
+                  handled = 1;
+              }
+          }
+          else if(pte == 0 || (*pte & PTE_V) == 0) {
+              if(lazyalloc(p->pagetable, fault_va, p->sz) == 0) {
+                  handled = 1;
+              }
+          }
       }
-      // Lazy allocation для невыделенных страниц
-      else if(fault_va < p->sz && (pte == 0 || (*pte & PTE_V) == 0)) {
-        if(lazyalloc(p->pagetable, fault_va, p->sz) == 0) {
-          handled = 1;
-        }
-      }
-    }
 
-    // Если ошибка не обработана, убиваем процесс
-    if(!handled) {
-      if(scause != 15 || fault_va >= MAXVA) {
-        printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
-        printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), fault_va);
+      if(!handled) {
+          if(scause != 15 || fault_va >= MAXVA) {
+              printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
+              printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), fault_va);
+          }
+          p->killed = 1;
       }
-      p->killed = 1;
-    }
-  } 
+  }
+
+
   else if((which_dev = devintr()) != 0){
     // Обработка аппаратных прерываний (таймер, устройства)
     // ok

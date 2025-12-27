@@ -14,7 +14,7 @@ sub entry {
     print " ecall\n";
     print " ret\n";
 }
-	
+  
 entry("fork");
 entry("exit");
 entry("wait");
@@ -31,8 +31,14 @@ entry("fstat");
 entry("link");
 entry("mkdir");
 entry("chdir");
+entry("shm_open");
+entry("shm_unlink");
+entry("shm_mmap");
+entry("shm_munmap");
 entry("dup");
 entry("getpid");
 entry("sbrk");
 entry("sleep");
 entry("uptime");
+entry("dump");
+entry("dump2");

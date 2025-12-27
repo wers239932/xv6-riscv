@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "shm.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -501,5 +502,158 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+uint64
+sys_shm_open(void)
+{
+  char name[SHM_NAME_MAX];
+  int oflags;
+  int mode;
+  struct file *f;
+  struct shm_object *shm;
+  int fd;
+
+  if(argstr(0, name, SHM_NAME_MAX) < 0)
+    return -1;
+  argint(1, &oflags);
+  argint(2, &mode);
+
+  // Validate name (must start with '/')
+  if(name[0] != '/' || strlen(name) < 2)
+    return -1;
+
+  // For simplicity, we'll use a fixed size for new objects
+  uint64 size = PGSIZE; // Default to one page
+
+  // First, try to lookup existing object
+  shm = shm_lookup(name);
+  
+  if(shm == 0) {
+    // Object doesn't exist
+    if(!(oflags & O_CREATE)) {
+      // Can't open non-existent object without O_CREATE
+      return -1;
+    }
+    // Create new object
+    shm = shm_create(name, size);
+    if(shm == 0)
+      return -1;
+  } else {
+    // Object exists
+    if((oflags & O_CREATE) && (oflags & O_EXCL)) {
+      // O_CREATE | O_EXCL means fail if exists
+      shm_ref_dec(shm);
+      return -1;
+    }
+    // Use existing object (shm_lookup already incremented ref count)
+  }
+
+  if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0) {
+    if(f)
+      fileclose(f);
+    shm_ref_dec(shm);
+    return -1;
+  }
+
+  f->type = FD_SHM;
+  f->shm = shm;
+  f->readable = !(oflags & O_WRONLY);
+  f->writable = (oflags & O_WRONLY) || (oflags & O_RDWR);
+  f->off = 0;
+
+  return fd;
+}
+
+uint64
+sys_shm_unlink(void)
+{
+  char name[SHM_NAME_MAX];
+
+  if(argstr(0, name, SHM_NAME_MAX) < 0)
+    return -1;
+
+  // Validate name (must start with '/')
+  if(name[0] != '/' || strlen(name) < 2)
+    return -1;
+
+  return shm_unlink(name);
+}
+
+uint64
+sys_shm_mmap(void)
+{
+  int fd;
+  uint64 addr;
+  uint64 length;
+  int prot;
+  struct file *f;
+  struct proc *p = myproc();
+
+  argint(0, &fd);
+  argaddr(1, &addr);
+  argaddr(2, &length);
+  argint(3, &prot);
+
+  // Get the file descriptor
+  if(fd < 0 || fd >= NOFILE || (f = p->ofile[fd]) == 0)
+    return -1;
+
+  // Must be a shared memory file
+  if(f->type != FD_SHM)
+    return -1;
+
+  // Check if we have a valid shared memory object
+  if(!f->shm || !f->shm->valid)
+    return -1;
+
+  // For simplicity, use a fixed virtual address if addr is 0
+  if(addr == 0) {
+    addr = 0x60000000; // Use a high address to avoid conflicts
+  }
+
+  // Check alignment
+  if(addr % PGSIZE != 0)
+    return -1;
+
+  // Check length
+  if(length == 0 || length > f->shm->size)
+    return -1;
+
+  // Convert protection flags
+  int perm = PTE_U;
+  if(prot & 0x1) perm |= PTE_R; // PROT_READ
+  if(prot & 0x2) perm |= PTE_W; // PROT_WRITE
+  if(prot & 0x4) perm |= PTE_X; // PROT_EXEC
+
+  // Map the shared memory pages
+  if(shm_map_pages(p->pagetable, addr, f->shm, perm) < 0)
+    return -1;
+
+  return addr;
+}
+
+uint64
+sys_shm_munmap(void)
+{
+  uint64 addr;
+  uint64 length;
+  struct proc *p = myproc();
+
+  argaddr(0, &addr);
+  argaddr(1, &length);
+
+  // Check alignment
+  if(addr % PGSIZE != 0)
+    return -1;
+
+  // For simplicity, we'll find the shared memory object by looking through
+  // the process's open files to find one that might be mapped at this address
+  // In a full implementation, we'd maintain a mapping table
+  
+  // For now, just unmap the pages - this is a simplified implementation
+  uint64 npages = PGROUNDUP(length) / PGSIZE;
+  uvmunmap(p->pagetable, addr, npages, 1);
+
   return 0;
 }

@@ -17,11 +17,19 @@ int fstat(int fd, struct stat*);
 int link(const char*, const char*);
 int mkdir(const char*);
 int chdir(const char*);
+int shm_open(const char*, int, int);
+int shm_unlink(const char*);
+void* shm_mmap(int fd, void* addr, uint64 length, int prot);
+int shm_munmap(void* addr, uint64 length);
 int dup(int);
 int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int dump(void);
+int dump2(int pid, int register_num, uint64* return_value);
+void* shm_mmap(int fd, void* addr, uint64 length, int prot);
+int shm_munmap(void* addr, uint64 length);
 
 // ulib.c
 int stat(const char*, struct stat*);
