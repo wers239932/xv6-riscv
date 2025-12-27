@@ -25,14 +25,6 @@ struct spinlock kreflock;
 int kref_count[PHYSTOP / PGSIZE];
 
 void
-kinit()
-{
-  initlock(&kmem.lock, "kmem");
-  initlock(&kreflock, "ref_counter");
-  freerange(end, (void*)PHYSTOP);
-}
-
-void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
@@ -41,6 +33,14 @@ freerange(void *pa_start, void *pa_end)
     kref_count[(uint64)p / PGSIZE] = 0;
     kfree(p);
   }
+}
+
+void
+kinit()
+{
+  initlock(&kmem.lock, "kmem");
+  initlock(&kreflock, "ref_counter");
+  freerange(end, (void*)PHYSTOP);
 }
 
 // Free the page of physical memory pointed at by pa,
