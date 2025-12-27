@@ -28,7 +28,6 @@ int i;
 
     // Проверяем список процессов
     printf("Parent process checking ps:\n");
-    ps();
 
     // Можно собрать их через wait
     for (i = 0; i < 3; i++) {

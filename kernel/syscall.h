@@ -22,4 +22,3 @@
 #define SYS_close  21
 #define SYS_dump   22
 #define SYS_dump2  23
-#define SYS_ps     24

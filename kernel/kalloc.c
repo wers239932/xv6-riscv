@@ -12,12 +12,22 @@
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+struct run {
+  struct run *next;
+};
+
+struct {
+  struct spinlock lock;
+  struct run *freelist;
+} kmem;
+
 void
 kinit()
 {
-  // Initialize buddy allocator with all physical memory
+
   bd_init((char*)PGROUNDUP((uint64)end), (void*)PHYSTOP);
 }
+
 
 // Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a
@@ -31,7 +41,6 @@ kfree(void *pa)
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-  
   bd_free(pa);
 }
 
@@ -41,9 +50,7 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  void *r;
-  
-  r = bd_malloc(PGSIZE);
+  void *r = bd_malloc(PGSIZE);
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return r;
