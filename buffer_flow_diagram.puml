@@ -1,0 +1,208 @@
+@startuml Buffer Flow Diagram
+!theme plain
+
+title Поток данных через буфер lastDeadChild
+
+skinparam activityDiagramBorder 2
+skinparam activityBackgroundColor WhiteSmoke
+skinparam activityBorderColor Black
+skinparam activityStartColor Green
+skinparam activityEndColor Red
+skinparam activityBarColor SaddleBrown
+skinparam activityFontSize 11
+
+|Процесс Child|
+start
+
+:Выполнение процесса;
+
+:exit(status) вызван;
+
+|Процесс Child|
+:Закрыть файлы и ресурсы;
+:Отдать детей init;
+:Получить parent;
+
+if (parent->lastDeadChild.valid == 0?) then (Да - БУФЕР СВОБОДЕН)
+  :Записать в буфер родителя:
+  **lastDeadChild.status = status**
+  **lastDeadChild.pid = my_pid**
+  **lastDeadChild.valid = 1**;
+  
+  #LightGreen:Буфер заполнен ✓;
+  
+  :parent = initproc
+  (перепривязка);
+  
+else (Нет - БУФЕР ЗАНЯТ)
+  :НЕ записывать в буфер
+  (родитель уже имеет статус);
+  
+  #Yellow:Записать время:
+  **zombie_since = ticks**;
+  
+  :parent = initproc
+  (перепривязка);
+endif
+
+:Общие действия:
+**p->state = ZOMBIE**
+**p->xstate = status**
+**p->zombie_since = ticks**;
+
+:wakeup(parent);
+
+#Pink:Стать ZOMBIE процессом;
+
+|Scheduler|
+
+fork
+  :Цикл scheduler();
+  
+  repeat
+    if (Найден старый зомби?) then (Да)
+      if ((ticks - zombie_since) > TIMEOUT?) then (Да)
+        
+        if (parent != initproc?) then (Да)
+          :Перепривязать:
+          **p->parent = initproc**;
+          
+          :wakeup(initproc);
+        endif
+        
+        if (parent->lastDeadChild.valid == 0?) then (Да)
+          :Сохранить в буфер:
+          **parent->lastDeadChild.pid = p->pid**
+          **parent->lastDeadChild.status = p->xstate**
+          **parent->lastDeadChild.valid = 1**;
+          
+          #LightGreen:Статус сохранён в буфер;
+        else (Нет)
+          :Буфер занят,
+          пропустить;
+        endif
+        
+        #Red:freeproc(p);
+        stop
+      endif
+    endif
+  repeat while (Продолжить цикл?) is (Да)
+  
+fork again
+
+|Parent Process|
+
+:Parent: wait() вызван;
+
+:acquire(wait_lock);
+
+' Фаза 1: Проверка буфера
+if (lastDeadChild.valid == 1?) then (Да - ЕСТЬ В БУФЕРЕ)
+  #LightBlue:**Фаза 1: Чтение из буфера**;
+  
+  :Получить из буфера:
+  **pid = lastDeadChild.pid**
+  **status = lastDeadChild.status**;
+  
+  :Очистить буфер:
+  **lastDeadChild.valid = 0**;
+  
+  #LightGreen:Буфер освобожден ✓;
+  
+  :Найти зомби по PID;
+  
+  if (Зомби найден?) then (Да)
+    #Red:freeproc(zombie);
+  endif
+  
+  :return pid;
+  stop
+  
+else (Нет - БУФЕР ПУСТ)
+  #LightBlue:**Фаза 2: Поиск живых зомби**;
+  
+  :Сканировать детей;
+  
+  if (Найден ZOMBIE?) then (Да)
+    :Получить данные:
+    **pid = zombie->pid**
+    **status = zombie->xstate**;
+    
+    ' Попытка заполнить буфер следующим зомби
+    :Проверить других зомби-детей;
+    
+    if (Есть ещё зомби-ребёнок?) then (Да)
+      if (lastDeadChild.valid == 0?) then (Да)
+        :Записать следующего в буфер:
+        **lastDeadChild.pid = next_zombie->pid**
+        **lastDeadChild.status = next_zombie->xstate**
+        **lastDeadChild.valid = 1**;
+        
+        #LightGreen:Буфер заполнен следующим ✓;
+      else (Нет - буфер занят)
+        :Не записывать;
+      endif
+    endif
+    
+    #Red:freeproc(zombie);
+    
+    :return pid;
+    stop
+    
+  else (Нет)
+    #Orange:**Фаза 3: Нет зомби-детей**;
+    
+    if (myproc() == initproc?) then (Да)
+      :Init процесс:
+      Сканировать proc[];
+      
+      :Найти всех зомби с
+      parent == initproc;
+      
+      repeat
+        :Найден reparented зомби;
+        
+        #Red:freeproc(zombie);
+        
+      repeat while (Есть ещё?) is (Да)
+      
+      :return pid последнего;
+      stop
+      
+    else (Нет)
+      :Обычный процесс;
+      
+      :return -1
+      (нет детей);
+      stop
+    endif
+  endif
+endif
+
+end fork
+
+legend right
+  **Цветовые обозначения:**
+  
+  <#LightGreen>Успешная операция с буфером</#LightGreen>
+  <#LightBlue>Фаза обработки в wait()</#LightBlue>
+  <#Yellow>Альтернативный путь (буфер занят)</#Yellow>
+  <#Pink>Состояние ZOMBIE</#Pink>
+  <#Orange>Особый случай (нет детей)</#Orange>
+  <#Red>Освобождение процесса</#Red>
+  
+  ---
+  
+  **lastDeadChild - буфер на 1 статус:**
+  - **valid = 0** → буфер свободен
+  - **valid = 1** → буфер содержит статус
+  
+  **Приоритеты в wait():**
+  1. Буфер (если заполнен)
+  2. Текущие зомби-дети
+  3. Init собирает reparented
+  
+  **Timeout авто-сборки: 10 тиков**
+endlegend
+
+@enduml

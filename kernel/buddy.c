@@ -10,7 +10,7 @@
 
 static int nsizes;  // the number of entries in bd_sizes array
 
-#define LEAF_SIZE 16          // The smallest block size
+#define LEAF_SIZE 32          // The smallest block size
 #define MAXSIZE (nsizes - 1)  // Largest index in bd_sizes array
 #define BLK_SIZE(k) ((1L << (k)) * LEAF_SIZE)  // Size of block at size k
 #define HEAP_SIZE BLK_SIZE(MAXSIZE)
@@ -58,6 +58,13 @@ void bit_clear(char *array, int index) {
   array[index / 8] = (b & ~m);
 }
 
+// Flip bit at position index in array - used for XOR operations
+void bit_flip(char *array, int index) {
+  char b = array[index / 8];
+  char m = (1 << (index % 8));
+  array[index / 8] = (b ^ m);
+}
+
 // Print a bit vector as a list of ranges of 1 bits
 void bd_print_vector(char *vector, int len) {
   int last, lb;
@@ -81,8 +88,9 @@ void bd_print() {
   for (int k = 0; k < nsizes; k++) {
     printf("size %d (blksz %ld nblk %d): free list: ", k, BLK_SIZE(k), NBLK(k));
     lst_print(&bd_sizes[k].free);
-    printf("  alloc:");
-    bd_print_vector(bd_sizes[k].alloc, NBLK(k));
+    printf("  alloc (XOR pairs):");
+    // With XOR optimization, alloc array stores one bit per pair  
+    bd_print_vector(bd_sizes[k].alloc, (NBLK(k) + 1) / 2);
     if (k > 0) {
       printf("  split:");
       bd_print_vector(bd_sizes[k].split, NBLK(k));
@@ -114,7 +122,18 @@ void *addr(int k, int bi) {
   return (char *)bd_base + n;
 }
 
-// allocate nbytes, but malloc won't return anything smaller than LEAF_SIZE
+// Get the index for the XOR bit of a buddy pair
+// For buddy blocks (i, i+1) we use one bit in alloc array
+int pair_index(int bi) {
+  return bi / 2;
+}
+
+// Check if exactly one block in a pair is allocated
+// XOR bit = 1 means exactly one block in the pair is allocated
+int pair_has_one_allocated(int k, int bi) {
+  return bit_isset(bd_sizes[k].alloc, pair_index(bi));
+}
+
 void *bd_malloc(uint64 nbytes) {
   int fk, k;
 
@@ -132,13 +151,17 @@ void *bd_malloc(uint64 nbytes) {
 
   // Found a block; pop it and potentially split it.
   char *p = lst_pop(&bd_sizes[k].free);
-  bit_set(bd_sizes[k].alloc, blk_index(k, p));
+  int p_idx = blk_index(k, p);
+  
+
+  bit_flip(bd_sizes[k].alloc, pair_index(p_idx));
+  
   for (; k > fk; k--) {
     // split a block at size k and mark one half allocated at size k-1
     // and put the buddy on the free list at size k-1
     char *q = p + BLK_SIZE(k - 1);  // p's buddy
     bit_set(bd_sizes[k].split, blk_index(k, p));
-    bit_set(bd_sizes[k - 1].alloc, blk_index(k - 1, p));
+    bit_set(bd_sizes[k - 1].alloc, pair_index(blk_index(k - 1, p)));
     lst_push(&bd_sizes[k - 1].free, q);
   }
   release(&lock);
@@ -166,19 +189,23 @@ void bd_free(void *p) {
   for (k = size(p); k < MAXSIZE; k++) {
     int bi = blk_index(k, p);
     int buddy = (bi % 2 == 0) ? bi + 1 : bi - 1;
-    bit_clear(bd_sizes[k].alloc, bi);           // free p at size k
-    if (bit_isset(bd_sizes[k].alloc, buddy)) {  // is buddy allocated?
-      break;                                    // break out of loop
-    }
-    // budy is free; merge with buddy
-    q = addr(k, buddy);
-    lst_remove(q);  // remove buddy from free list
-    if (buddy % 2 == 0) {
-      p = q;
-    }
+    int pair_idx = pair_index(bi);
+  
+    int old_xor = bit_isset(bd_sizes[k].alloc, pair_idx);
+    bit_flip(bd_sizes[k].alloc, pair_idx);
+    
+    if (old_xor) {
+      q = addr(k, buddy);
+      lst_remove(q);  // remove buddy from free list
+      if (buddy % 2 == 0) {
+        p = q;
+      }
     // at size k+1, mark that the merged buddy pair isn't split
     // anymore
-    bit_clear(bd_sizes[k + 1].split, blk_index(k + 1, p));
+      bit_clear(bd_sizes[k + 1].split, blk_index(k + 1, p));
+    } else {
+      break;
+    }
   }
   lst_push(&bd_sizes[k].free, p);
   release(&lock);
@@ -215,39 +242,64 @@ void bd_mark(void *start, void *stop) {
         // if a block is allocated at size k, mark it as split too.
         bit_set(bd_sizes[k].split, bi);
       }
-      bit_set(bd_sizes[k].alloc, bi);
+      bit_flip(bd_sizes[k].alloc, pair_index(bi));
     }
   }
 }
 
 // If a block is marked as allocated and the buddy is free, put the
 // buddy on the free list at size k.
-int bd_initfree_pair(int k, int bi) {
+int bd_initfree_pair(int k, int bi, int bi_is_in_free_region) {
   int buddy = (bi % 2 == 0) ? bi + 1 : bi - 1;
   int free = 0;
-  if (bit_isset(bd_sizes[k].alloc, bi) != bit_isset(bd_sizes[k].alloc, buddy)) {
-    // one of the pair is free
+  int pair_idx = pair_index(bi);
+  
+  // If XOR bit is 1, one of the pair is allocated
+  if (bit_isset(bd_sizes[k].alloc, pair_idx)) {
     free = BLK_SIZE(k);
-    if (bit_isset(bd_sizes[k].alloc, bi))
-      lst_push(&bd_sizes[k].free, addr(k, buddy));  // put buddy on free list
-    else
-      lst_push(&bd_sizes[k].free, addr(k, bi));  // put bi on free list
+    
+    // Determine which block is free
+    int free_block = bi_is_in_free_region ? bi : buddy;
+    
+    // Additional check: for k > 0, use split information for more accuracy
+    if (k > 0) {
+      if (bit_isset(bd_sizes[k].split, bi)) {
+        // bi is split, so it's allocated
+        free_block = buddy;
+      } else if (bit_isset(bd_sizes[k].split, buddy)) {
+        // buddy is split, so it's allocated  
+        free_block = bi;
+      }
+      // else use the boundary-based decision above
+    }
+    
+    lst_push(&bd_sizes[k].free, addr(k, free_block));
   }
   return free;
 }
 
-// Initialize the free lists for each size k.  For each size k, there
-// are only two pairs that may have a buddy that should be on free list:
-// bd_left and bd_right.
 int bd_initfree(void *bd_left, void *bd_right) {
   int free = 0;
+  char *bd_right_char = (char *)bd_right;
 
-  for (int k = 0; k < MAXSIZE; k++) {  // skip max size
+  for (int k = 0; k < MAXSIZE; k++) {
     int left = blk_index_next(k, bd_left);
     int right = blk_index(k, bd_right);
-    free += bd_initfree_pair(k, left);
+    
+    // For left boundary: left is in free region
+    free += bd_initfree_pair(k, left, 1);
+    
     if (right <= left) continue;
-    free += bd_initfree_pair(k, right);
+    
+    // For right boundary: check if the block is free
+    char *right_addr = addr(k, right);
+    if (right_addr + BLK_SIZE(k) <= bd_right_char) {
+      // Block is in free region
+      free += bd_initfree_pair(k, right, 1);
+    } else {
+      // Block is partially allocated
+      free += bd_initfree_pair(k, right, 0);
+    }
   }
   return free;
 }
@@ -291,27 +343,51 @@ void bd_init(void *base, void *end) {
 
   // allocate bd_sizes array
   bd_sizes = (Sz_info *)p;
-  p += sizeof(Sz_info) * nsizes;
+  int sz_info_bytes = sizeof(Sz_info) * nsizes;
+  p += sz_info_bytes;
   memset(bd_sizes, 0, sizeof(Sz_info) * nsizes);
+  printf("bd: Sz_info array: %d bytes (sizeof(Sz_info)=%lu)\n", sz_info_bytes, sizeof(Sz_info));
 
   // initialize free list and allocate the alloc array for each size k
+  // With XOR optimization, we only need one bit per PAIR of blocks
+  int total_alloc = 0;
+  int total_alloc_orig = 0;
   for (int k = 0; k < nsizes; k++) {
     lst_init(&bd_sizes[k].free);
-    sz = sizeof(char) * ROUNDUP(NBLK(k), 8) / 8;
+    
+    // XOR optimization: one bit per pair of buddy blocks
+    // pairs = NBLK / 2 (for even NBLK, which is always true for powers of 2)
+    // bytes = (pairs + 7) / 8 = (NBLK/2 + 7) / 8 = (NBLK + 14) / 16
+    // Minimum 1 byte needed even for NBLK=1
+    sz = (NBLK(k) + 14) / 16;
+    if (sz == 0) sz = 1;
+    int orig_sz = (NBLK(k) + 7) / 8;
+    
     bd_sizes[k].alloc = p;
     memset(bd_sizes[k].alloc, 0, sz);
     p += sz;
+    total_alloc += sz;
+    total_alloc_orig += orig_sz;
   }
+  printf("bd: total alloc array size: %d bytes (orig would be %d, saved %d)\n", 
+         total_alloc, total_alloc_orig, total_alloc_orig - total_alloc);
 
   // allocate the split array for each size k, except for k = 0, since
   // we will not split blocks of size k = 0, the smallest size.
+  int total_split = 0;
   for (int k = 1; k < nsizes; k++) {
     sz = sizeof(char) * (ROUNDUP(NBLK(k), 8)) / 8;
     bd_sizes[k].split = p;
     memset(bd_sizes[k].split, 0, sz);
     p += sz;
+    total_split += sz;
   }
+  printf("bd: total split array size: %d bytes\n", total_split);
+  
+  char *p_before_round = p;
   p = (char *)ROUNDUP((uint64)p, LEAF_SIZE);
+  printf("bd: before ROUNDUP: %p, after: %p, padding: %ld bytes\n", 
+         p_before_round, p, p - p_before_round);
 
   // done allocating; mark the memory range [base, p) as allocated, so
   // that buddy will not hand out that memory.
@@ -326,6 +402,9 @@ void bd_init(void *base, void *end) {
   int free = bd_initfree(p, bd_end);
 
   // check if the amount that is free is what we expect
+  printf("bd: free=%d, expected=%ld (MAXSIZE=%ld, meta=%d, unavail=%d)\n",
+         free, BLK_SIZE(MAXSIZE) - meta - unavailable, BLK_SIZE(MAXSIZE), meta, unavailable);
+  printf("bd: free memory in pages: %d\n", free / 4096);
   if (free != BLK_SIZE(MAXSIZE) - meta - unavailable) {
     printf("free %d %ld\n", free, BLK_SIZE(MAXSIZE) - meta - unavailable);
     panic("bd_init: free mem");
