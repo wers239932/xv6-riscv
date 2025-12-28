@@ -12,6 +12,10 @@
 #define SYS_getpid 11
 #define SYS_sbrk   12
 #define SYS_sleep  13
+#define SYS_shm_open 22
+#define SYS_shm_unlink 23
+#define SYS_shm_mmap 24
+#define SYS_shm_munmap 25
 #define SYS_uptime 14
 #define SYS_open   15
 #define SYS_write  16

@@ -9,6 +9,7 @@ struct sleeplock;
 struct stat;
 struct superblock;
 struct list;
+struct shm_object;
 
 // bio.c
 void            binit(void);
@@ -198,6 +199,20 @@ void            virtio_disk_intr(void);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
+
+// shm.c
+void           shm_init(void);
+struct shm_object* shm_create(char*, uint64);
+struct shm_object* shm_lookup(char*);
+void           shm_ref_inc(struct shm_object*);
+void           shm_ref_dec(struct shm_object*);
+int            shm_unlink(char*);
+int            shm_map_pages(pagetable_t, uint64, struct shm_object*, int);
+void           shm_unmap_pages(pagetable_t, uint64, struct shm_object*);
+int            shm_read(struct shm_object*, uint64, uint, int);
+int            shm_write(struct shm_object*, uint64, uint, int);
+
+
 // list.c
 void           lst_init(struct list*);
 void           lst_remove(struct list*);
@@ -210,3 +225,29 @@ int            lst_empty(struct list*);
 void           bd_init(void*,void*);
 void           bd_free(void*);
 void           *bd_malloc(uint64);
+
+// shm.c
+void           shm_init(void);
+struct shm_object* shm_create(char*, uint64);
+struct shm_object* shm_lookup(char*);
+void           shm_ref_inc(struct shm_object*);
+void           shm_ref_dec(struct shm_object*);
+int            shm_unlink(char*);
+int            shm_map_pages(pagetable_t, uint64, struct shm_object*, int);
+void           shm_unmap_pages(pagetable_t, uint64, struct shm_object*);
+int            shm_read(struct shm_object*, uint64, uint, int);
+int            shm_write(struct shm_object*, uint64, uint, int);
+
+// shm.c
+void           shm_init(void);
+struct shm_object* shm_create(char*, uint64);
+struct shm_object* shm_lookup(char*);
+void           shm_ref_inc(struct shm_object*);
+void           shm_ref_dec(struct shm_object*);
+int            shm_unlink(char*);
+int            shm_map_pages(pagetable_t, uint64, struct shm_object*, int);
+void           shm_unmap_pages(pagetable_t, uint64, struct shm_object*);
+int            shm_read(struct shm_object*, uint64, uint, int);
+int            shm_write(struct shm_object*, uint64, uint, int);
+
+

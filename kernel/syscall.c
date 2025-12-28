@@ -94,6 +94,10 @@ extern uint64 sys_getpid(void);
 extern uint64 sys_sbrk(void);
 extern uint64 sys_sleep(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_shm_open(void);
+extern uint64 sys_shm_unlink(void);
+extern uint64 sys_shm_mmap(void);
+extern uint64 sys_shm_munmap(void);
 extern uint64 sys_open(void);
 extern uint64 sys_write(void);
 extern uint64 sys_mknod(void);
@@ -103,6 +107,14 @@ extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_dump(void);
 extern uint64 sys_dump2(void);
+extern uint64 sys_shm_open(void);
+extern uint64 sys_shm_unlink(void);
+extern uint64 sys_shm_mmap(void);
+extern uint64 sys_shm_munmap(void);
+extern uint64 sys_shm_open(void);
+extern uint64 sys_shm_unlink(void);
+extern uint64 sys_shm_mmap(void);
+extern uint64 sys_shm_munmap(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -130,6 +142,10 @@ static uint64 (*syscalls[])(void) = {
 [SYS_close]   sys_close,
 [SYS_dump]    sys_dump,
 [SYS_dump2]   sys_dump2,
+[SYS_shm_open] sys_shm_open,
+[SYS_shm_unlink] sys_shm_unlink,
+[SYS_shm_mmap] sys_shm_mmap,
+[SYS_shm_munmap] sys_shm_munmap,
 };
 
 void
