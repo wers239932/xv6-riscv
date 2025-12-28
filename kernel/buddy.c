@@ -260,8 +260,8 @@ int bd_initfree(void *bd_left, void *bd_right) {
 int bd_mark_data_structures(char *p) {
   int meta = p - (char *)bd_base;
 #ifndef DEBUG
-  printf("bd: %d meta bytes for managing %ld bytes of memory\n", meta,
-         BLK_SIZE(MAXSIZE));
+  // printf("bd: %d meta bytes for managing %ld bytes of memory\n", meta,
+  //        BLK_SIZE(MAXSIZE));
 #endif
   bd_mark(bd_base, p);
   return meta;
@@ -272,7 +272,7 @@ int bd_mark_unavailable(void *end, void *left) {
   int unavailable = BLK_SIZE(MAXSIZE) - (end - bd_base);
   if (unavailable > 0) unavailable = ROUNDUP(unavailable, LEAF_SIZE);
 #ifndef DEBUG
-  printf("bd: 0x%x bytes unavailable\n", unavailable);
+  // printf("bd: 0x%x bytes unavailable\n", unavailable);
 #endif
   void *bd_end = bd_base + BLK_SIZE(MAXSIZE) - unavailable;
   bd_mark(bd_end, bd_base + BLK_SIZE(MAXSIZE));
