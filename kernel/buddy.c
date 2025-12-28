@@ -293,8 +293,8 @@ void bd_init(void *base, void *end) {
     nsizes++;  // round up to the next power of 2
   }
 #ifndef DEBUG
-  printf("bd: memory sz is %ld bytes; allocate an size array of length %d\n",
-         (char *)end - p, nsizes);
+  // printf("bd: memory sz is %ld bytes; allocate an size array of length %d\n",
+  //        (char *)end - p, nsizes);
 #endif
   // allocate bd_sizes array
   bd_sizes = (Sz_info *)p;
