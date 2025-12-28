@@ -431,13 +431,13 @@ wait(uint64 addr)
                 havekids = 1;
                 if(pp->state == ZOMBIE){
                     pid = pp->pid;
-                    if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                            sizeof(pp->xstate)) < 0) {
-                        release(&proc_lock);
-                        return -1;
-                    }
+                    int xstate = pp->xstate;
                     freeproc(pp);
                     release(&proc_lock);
+                    if(addr != 0 && copyout(p->pagetable, addr, (char *)&xstate,
+                                            sizeof(xstate)) < 0) {
+                        return -1;
+                    }
                     return pid;
                 }
             }
@@ -451,6 +451,10 @@ wait(uint64 addr)
         sleep(p, &proc_lock);
     }
 }
+
+
+
+
 
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
