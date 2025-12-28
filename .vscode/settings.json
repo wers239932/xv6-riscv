@@ -1,5 +1,4 @@
 {
     "C_Cpp.intelliSenseEngine": "disabled",
-    "clangd.path": "clangd-18",
-    "makefile.configureOnOpen": false
+    "clangd.path": "clangd-18"
 }

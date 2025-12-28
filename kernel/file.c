@@ -12,6 +12,7 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "shm.h"
 
 struct devsw devsw[NDEV];
 struct {
@@ -78,6 +79,8 @@ fileclose(struct file *f)
     begin_op();
     iput(ff.ip);
     end_op();
+  } else if(ff.type == FD_SHM){
+    shm_ref_dec(ff.shm);
   }
 
   bd_free(f);
@@ -95,6 +98,14 @@ filestat(struct file *f, uint64 addr)
     ilock(f->ip);
     stati(f->ip, &st);
     iunlock(f->ip);
+    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
+      return -1;
+    return 0;
+  } else if(f->type == FD_SHM){
+    // For shared memory, create a basic stat structure
+    memset(&st, 0, sizeof(st));
+    st.type = T_SHM;
+    st.size = f->shm->size;
     if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
       return -1;
     return 0;
@@ -123,6 +134,10 @@ fileread(struct file *f, uint64 addr, int n)
     if((r = readi(f->ip, 1, addr, f->off, n)) > 0)
       f->off += r;
     iunlock(f->ip);
+  } else if(f->type == FD_SHM){
+    r = shm_read(f->shm, addr, f->off, n);
+    if(r > 0)
+      f->off += r;
   } else {
     panic("fileread");
   }
@@ -174,6 +189,10 @@ filewrite(struct file *f, uint64 addr, int n)
       i += r;
     }
     ret = (i == n ? n : -1);
+  } else if(f->type == FD_SHM){
+    ret = shm_write(f->shm, addr, f->off, n);
+    if(ret > 0)
+      f->off += ret;
   } else {
     panic("filewrite");
   }
