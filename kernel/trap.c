@@ -95,6 +95,7 @@ usertrap(void)
           p->killed = 1;
       }
   }
+  
 
   else if((which_dev = devintr()) != 0){
     // Обработка аппаратных прерываний (таймер, устройства)
