@@ -58,7 +58,6 @@ usertrap(void)
     if(killed(p))
       exit(-1);
 
-      
     // sepc указывает на инструкцию ecall,
     // но мы хотим вернуться к следующей инструкции
     p->trapframe->epc += 4;
