@@ -25,22 +25,10 @@ struct spinlock kreflock;
 int kref_count[PHYSTOP / PGSIZE];
 
 void
-freerange(void *pa_start, void *pa_end)
-{
-  char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
-    kref_count[(uint64)p / PGSIZE] = 0;
-    kfree(p);
-  }
-}
-
-void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
   initlock(&kreflock, "ref_counter");
-  freerange(end, (void*)PHYSTOP);
+  bd_init((char*)PGROUNDUP((uint64)end), (void*)PHYSTOP);
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -55,7 +43,6 @@ kfree(void *pa)
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-  
   bd_free(pa);
 }
 
@@ -65,14 +52,8 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  struct run *r;
-
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
-
+  void *r = bd_malloc(PGSIZE);
+  
   if(r) {
     memset((char*)r, 5, PGSIZE); // fill with junk
     acquire(&kreflock);

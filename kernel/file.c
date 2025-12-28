@@ -16,6 +16,7 @@
 struct devsw devsw[NDEV];
 struct {
   struct spinlock lock;
+  //struct file file[NFILE];
 } ftable;
 
 void
@@ -30,12 +31,14 @@ filealloc(void)
 {
   struct file *f;
 
-  f = (struct file*)bd_malloc(sizeof(struct file));
-  if(f == 0)
+  f = (struct file *) bd_malloc(sizeof(struct file));
+  if (f == 0) {
     return 0;
-  
+  }
+  acquire(&ftable.lock);
   memset(f, 0, sizeof(struct file));
   f->ref = 1;
+  release(&ftable.lock);
   return f;
 }
 
@@ -76,7 +79,7 @@ fileclose(struct file *f)
     iput(ff.ip);
     end_op();
   }
-  
+
   bd_free(f);
 }
 

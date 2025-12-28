@@ -81,12 +81,6 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
-struct lastChildStatus {
-  int status;
-  int valid;
-  int pid;
-};
-
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -100,8 +94,6 @@ struct proc {
 
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
-  struct lastChildStatus lastDeadChild;
-  uint zombie_since;
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
@@ -112,4 +104,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+};
+
+struct proc_wrapper {
+  struct proc_wrapper *prev_wrap;
+  struct proc *proc;
+  struct proc_wrapper *next_wrap;
 };
